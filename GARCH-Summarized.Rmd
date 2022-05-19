@@ -1,0 +1,259 @@
+---
+title: "GARCH-Analysis"
+author: "Blaisonyl"
+date: "5/9/2022"
+output: word_document
+---
+load some libraries for the analysis
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(rugarch)
+library(xts)#for timeseries object coercion
+library(quantmod)
+library(ggplot2)
+library(broom)
+library(tidyverse)
+library(dplyr)
+```
+
+```{r}
+#global
+options(scipen = 100, digits = 4)
+```
+
+
+Read the data
+```{r cars}
+data = read.csv("C:/Users/Blaisonyl/Downloads/datalabcovid.csv")
+#data2 = read.csv("C:/Users/Blaisonyl/Downloads/ChiaraCOVID.csv")
+```
+
+Get the necessary data and clean it
+
+```{r pressure, echo=FALSE}
+data_cleaned <-data[2:828, ]
+data_cleaned$Date <- as.Date(data_cleaned$Date, "%m/%d/%Y") # Note the Y instead of y. Our interest is a 4digit year char.
+#data_cleaned["date.ts"] <- as.Date(data_cleaned$Date, "%m/%d/%Y")
+```
+
+Create a time series object
+```{r}
+data_ts <- xts(data_cleaned$Total_new_cases, data_cleaned$Date)
+data_ts1 <- xts(data_cleaned$Total_new_cases, data_cleaned$Date)
+class(data_ts) #Verify timeseries object
+plot(data_ts)#roughly check the nature of our dataset
+```
+
+Fix and tidy time series data
+```{r}
+colnames(data_ts) <- c('cases') #help with tidying the dataset
+data_ts <- tidy(data_ts) #clean the house for plotting
+```
+
+Plot the data
+```{r}
+
+ggplot(data_ts, aes(x = index, y = value, color = series))+ 
+  geom_line() + 
+  theme_bw() +
+  labs(title = "Daily cases of COVID from January 2020 to April 2022", x = "Date", y = "Cases")
+
+```
+
+Due to the scale of the graph, we might be tempted to think its a constant
+Trend till end of 2021, for this reason, i thought to look closely at 2020 - 2021 data to appreciate the underlying trends
+
+
+2020 data
+```{r}
+data2020 <- data_cleaned[1:348, ]
+data2020_ts <- xts(data2020 $Total_new_cases, data2020 $Date)
+colnames(data2020_ts) <- c('cases')
+data2020_ts <- tidy(data2020_ts)
+ggplot(data2020_ts, aes(x = index, y = value, color = series))+ 
+  geom_line() + 
+  theme_bw() +
+  labs(title = "Daily cases of COVID from January 2020 to December 2020", x = "Date", y = "Cases")
+
+```
+
+2021-2022 data
+```{r}
+
+data2021_2022 <- data_cleaned[349:713, ]
+data2021_2022_ts <- xts(data2021_2022 $Total_new_cases, data2021_2022$Date)
+colnames(data2021_2022_ts) <- c('cases')
+data2021_2022_ts <- tidy(data2021_2022_ts)
+ggplot(data2021_2022_ts, aes(x = index, y = value, color = series))+ 
+  geom_line() + 
+  theme_bw() +
+  labs(title = "Daily cases of COVID from January 2021 to December 2021", x = "Date", y = "Cases")
+
+```
+
+2020-2022 data
+```{r}
+
+data2020_2022 <- data_cleaned[1:713, ]
+data2020_2022_ts <- xts(data2020_2022 $Total_new_cases, data2020_2022$Date)
+colnames(data2020_2022_ts) <- c('cases')
+data2020_2022_ts <- tidy(data2020_2022_ts)
+ggplot(data2020_2022_ts, aes(x = index, y = value, color = series))+ 
+  geom_line() + 
+  theme_bw() +
+  labs(title = "Daily cases of COVID from January 2020 to January 2022", x = "Date", y = "Cases")
+
+```
+
+As we can see there are underlying differences in trends 
+
+GARCH model
+Note, We will do a couple of GARCH models and chose which to use based on the lowest AKAIKE value
+In the next lines i attemt to change the armaorder, variance model and the distribution.model arguments
+to obtain the model with the best fit 
+
+GARCH model for current day and error term of current day
+AIM to Chose the GARCH model with lowest AIC number AKA AKAIKE
+
+```{r}
+Garch_02 <- ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1, 1)), 
+                       mean.model = list(armaOrder = c(1, 1), include.mean = TRUE), 
+                       distribution.model = "std", fixed.pars = list(omega = 0))
+
+garch_result<- ugarchfit(spec = Garch_02, data = data_ts$value, solver = "hybrid")
+garch_result  ##13.401 best
+```
+
+This i think is the best garch model. and the best till the end of the script.
+
+
+Plot the prediction graph
+```{r}
+Predict <- ugarchboot(garch_result, n.ahead = 30, method = c("Partial", "Full")[1])
+plot(Predict, which = 2)
+#forcasts show that upper limits top dots, and lower limits bottom dots. 
+
+```
+Just to see how the actual predicted values look on a plot
+```{r}
+plot(Predict@forc, which = 1)
+```
+
+closer look
+```{r}
+plot(Predict@forc, which = 3)
+```
+
+
+```{r}
+Garch_02 <- ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1, 1)), 
+                       mean.model = list(armaOrder = c(1, 1), include.mean = TRUE), 
+                       distribution.model = "std", fixed.pars = list(omega = 0))
+
+garchfit<- ugarchfit(spec = Garch_02, data = data_ts$value, solver = "hybrid")
+garchfit
+
+```
+
+```{r}
+plot(garchfit, which = 2)
+```
+
+
+Plot a forcast graph
+```{r}
+spec <- getspec(garchfit)
+setfixed(spec) <- as.list(coef(garchfit))
+#pars <- spec@model$fixed.pars
+GarchForcast <- ugarchforecast(spec, data = data_ts1, n.roll = 826, n.ahead = 30, out.sample =826)
+
+```
+
+```{r}
+df <- c(data_cleaned$Total_new_cases)
+```
+
+
+```{r}
+plot(GarchForcast, which = 4, lwd = 6.0)
+```
+Preprocess Data
+
+```{r}
+Region_data <- data_cleaned
+columnnames<-colnames(Region_data)[-1]
+
+for (a in columnnames) {
+  suppressWarnings(Region_data[[a]] <- as.numeric(Region_data[[a]]) )
+}
+
+Region_data[is.na(Region_data)] <-0
+```
+
+Load region data
+
+```{r}
+
+Region_data$region1 <- rowSums(Region_data[, c("Seoul", "Incheon", "Gyeongi")], na.rm = TRUE)
+Region_data$region2 <- rowSums(Region_data[, c("Busan", "Daegu", "Gwangju", "Daejeon", "Ulsan", "Sejeon", "Kangwon", "Chungbuk", "Chungnam", "Jeonbuk", 
+"Jeonnam", "Gyeongbuk", "Gyeongnam", "Jeju")], na.rm = TRUE)
+
+```
+
+
+```{r}
+data_ts_R1 <- xts(Region_data$region1, Region_data$Date)
+data_ts_R2 <- xts(Region_data$region2, Region_data$Date)
+```
+
+Region 1 forecast
+```{r}
+GarchForcast1 <- ugarchforecast(spec, data = data_ts_R1, n.roll = 826, n.ahead = 30, out.sample =826)
+
+```
+
+```{r}
+plot(GarchForcast1, which = 4)
+```
+
+
+Region 2 forecast
+```{r}
+GarchForcast2 <- ugarchforecast(spec, data = data_ts_R2, n.roll = 826, n.ahead = 30, out.sample =826)
+plot(GarchForcast2, which = 4)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
